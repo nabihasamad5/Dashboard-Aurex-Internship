@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Search, Pencil, Trash2, X, Users, Gauge, Trophy, AlertTriangle, ImagePlus, Download, LayoutDashboard, UserRound } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, X, Users, Gauge, Trophy, AlertTriangle, ImagePlus, Download, LayoutDashboard, UserRound, RefreshCw } from "lucide-react";
 
-const KEY = "staffpulse.employees.v1";
+// REST API used for this dashboard (Task 2): DummyJSON users
+const API_URL = "https://dummyjson.com/users?limit=12&select=firstName,lastName,image,company";
+
 const DEPTS = ["Sales", "Customer Support", "Inventory", "Delivery", "Accounts"];
 const TINTS = ["bg-indigo-100 text-indigo-700", "bg-amber-100 text-amber-700", "bg-pink-100 text-pink-700", "bg-emerald-100 text-emerald-700", "bg-sky-100 text-sky-700"];
 // Weights: Tasks 35%, Quality 25%, Attendance 20%, Manager rating 20%
@@ -11,21 +13,36 @@ const tier = (s) =>
   : s >= 70 ? ["On track", "bg-sky-100 text-sky-700", "#0284c7"]
   : s >= 55 ? ["Needs improvement", "bg-amber-100 text-amber-700", "#d97706"]
   : ["At risk", "bg-rose-100 text-rose-700", "#e11d48"];
-const mk = (id, name, role, dept, assigned, done, quality, attendance, rating, notes, trend, goals) => ({ id, name, role, dept, assigned, done, quality, attendance, rating, notes, trend, goals: goals.map(([t, p], i) => ({ id: i + 1, t, p })), image: "" });
-const SEED = [
-  mk(1, "Ayesha Khan", "Senior Sales Associate", "Sales", 40, 38, 92, 98, 5, "Handles walk-in customers very well and upsells without pressure.", [78, 81, 84, 86, 90, 94], [["Reach 25 lakh monthly sales", 80], ["Train 2 new staff", 50]]),
-  mk(2, "Bilal Ahmed", "Sales Associate", "Sales", 40, 30, 78, 90, 3, "Good with regular customers. Needs to follow up on pending orders faster.", [66, 70, 68, 72, 74, 73], [["Follow up all pending orders within 24h", 40]]),
-  mk(3, "Hina Malik", "Support Lead", "Customer Support", 60, 55, 88, 95, 4, "Calm under pressure. Complaint resolution time improved this quarter.", [72, 75, 80, 82, 85, 87], [["Resolve complaints in under 24h", 75]]),
-  mk(4, "Usman Tariq", "Stock Keeper", "Inventory", 30, 27, 85, 92, 4, "Stock count mismatches are down. Keeps the storeroom organised.", [70, 72, 77, 79, 80, 84], [["Zero count mismatches for 3 months", 60]]),
-  mk(5, "Sana Riaz", "Delivery Coordinator", "Delivery", 50, 33, 70, 82, 3, "Late deliveries went up during the sale week. Route planning needs work.", [74, 71, 69, 66, 64, 66], [["Cut late deliveries to under 5%", 30]]),
-  mk(6, "Hamza Ali", "Delivery Rider", "Delivery", 45, 25, 58, 70, 2, "Absent several times this month. Customers reported damaged parcels.", [62, 60, 57, 55, 52, 50], [["Attendance above 90%", 20]]),
-  mk(7, "Maryam Iqbal", "Accounts Officer", "Accounts", 25, 24, 95, 100, 5, "Daily cash reports are always accurate and on time.", [88, 89, 91, 92, 94, 96], [["Automate monthly tax report", 85]]),
-  mk(8, "Zain Abbas", "Support Executive", "Customer Support", 55, 38, 66, 85, 3, "Improving, but still needs coaching on product knowledge.", [60, 62, 63, 66, 68, 69], [["Complete product training", 55]]),
-];
+
 const EMPTY = { name: "", role: "", dept: DEPTS[0], assigned: "", done: "", quality: "", attendance: "", rating: 3, notes: "", image: "" };
 const inp = "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100";
 const ini = (n) => n.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 const clamp = (v) => Math.max(0, Math.min(100, Number(v) || 0));
+
+// The API gives names, job titles and photos. Performance numbers are not part of the API,
+// so they are generated from the user id (the same user always gets the same numbers).
+const pseudo = (id, n, lo, hi) => lo + ((id * n) % (hi - lo + 1));
+const fromApi = (u) => {
+  const assigned = pseudo(u.id, 7, 25, 60);
+  const done = assigned - pseudo(u.id, 11, 0, Math.floor(assigned * 0.45));
+  const emp = {
+    id: u.id,
+    name: `${u.firstName} ${u.lastName}`,
+    role: u.company?.title || "Team member",
+    dept: DEPTS[u.id % DEPTS.length],
+    assigned,
+    done,
+    quality: pseudo(u.id, 17, 55, 98),
+    attendance: pseudo(u.id, 23, 65, 100),
+    rating: pseudo(u.id, 5, 2, 5),
+    notes: u.company?.name ? `Works with ${u.company.name}.` : "",
+    image: u.image || "",
+    goals: [{ id: 1, t: "Complete quarterly review", p: pseudo(u.id, 9, 10, 90) }],
+  };
+  const s = score(emp);
+  emp.trend = [-8, -6, -5, -3, -1, 0].map((d, i) => clamp(s + d + (i < 5 ? pseudo(u.id, i + 3, 0, 3) - 1 : 0)));
+  return emp;
+};
 
 const toDataUrl = (file) =>
   new Promise((resolve, reject) => {
@@ -49,15 +66,6 @@ const toDataUrl = (file) =>
     };
     reader.readAsDataURL(file);
   });
-
-const load = () => {
-  try {
-    const s = JSON.parse(localStorage.getItem(KEY));
-    return Array.isArray(s) ? s : SEED;
-  } catch {
-    return SEED;
-  }
-};
 
 function Modal({ title, onClose, children, wide }) {
   return (
@@ -119,7 +127,9 @@ function Spark({ data }) {
 }
 
 export default function App() {
-  const [items, setItems] = useState(load);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [view, setView] = useState("overview");
   const [q, setQ] = useState("");
   const [dept, setDept] = useState("All");
@@ -128,17 +138,32 @@ export default function App() {
   const [del, setDel] = useState(null);
   const [selId, setSelId] = useState(null);
   const [imgErr, setImgErr] = useState("");
-  const [full, setFull] = useState(false);
   const [goal, setGoal] = useState("");
 
-  useEffect(() => {
+  // Fetch employees from the REST API
+  const fetchEmployees = async (signal) => {
+    setLoading(true);
+    setError("");
     try {
-      localStorage.setItem(KEY, JSON.stringify(items));
-      setFull(false);
-    } catch {
-      setFull(true);
+      const res = await fetch(API_URL, { signal });
+      if (!res.ok) throw new Error(`The server responded with status ${res.status}.`);
+      const data = await res.json();
+      setItems(data.users.map(fromApi));
+    } catch (err) {
+      if (err.name !== "AbortError") setError(err.message || "Could not load employees.");
+    } finally {
+      if (!signal || !signal.aborted) setLoading(false);
     }
-  }, [items]);
+  };
+
+  // Load the data once when the page opens
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchEmployees(controller.signal);
+    return () => controller.abort();
+  }, []);
+
+  const ready = !loading && !error;
 
   const scored = useMemo(() => items.map((e) => ({ ...e, s: score(e) })), [items]);
   const ranked = useMemo(() => [...scored].sort((a, b) => b.s - a.s), [scored]);
@@ -232,16 +257,41 @@ export default function App() {
             </div>
             <nav className="flex gap-1">{[tab("overview", "Overview", LayoutDashboard), tab("team", "Team", UserRound)]}</nav>
           </div>
-          <button onClick={() => setForm(EMPTY)} className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition hover:bg-indigo-700 active:scale-95">
-            <Plus size={18} /> Add employee
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => fetchEmployees()} disabled={loading} className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">
+              <RefreshCw size={16} className={loading ? "animate-spin" : ""} /> <span className="hidden sm:inline">Reload data</span>
+            </button>
+            <button onClick={() => setForm(EMPTY)} className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition hover:bg-indigo-700 active:scale-95">
+              <Plus size={18} /> Add employee
+            </button>
+          </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
-        {full && <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">Browser storage is full, so your latest changes are not saved. Remove a few profile photos to continue.</div>}
+        {/* Loading state */}
+        {loading && (
+          <div className="rounded-2xl border border-slate-200 bg-white py-20 text-center" role="status" aria-live="polite">
+            <RefreshCw size={28} className="mx-auto mb-3 animate-spin text-indigo-600" />
+            <p className="font-semibold">Loading employees...</p>
+            <p className="mt-1 text-sm text-slate-500">Fetching data from the API.</p>
+          </div>
+        )}
 
-        {view === "overview" && (
+        {/* Error state */}
+        {!loading && error && (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-8 text-center" role="alert">
+            <AlertTriangle size={28} className="mx-auto mb-3 text-rose-600" />
+            <p className="font-semibold text-rose-700">Could not load employees</p>
+            <p className="mt-1 text-sm text-rose-600">{error}</p>
+            <p className="mt-1 text-sm text-slate-500">Check your internet connection and try again.</p>
+            <button onClick={() => fetchEmployees()} className="mt-4 rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700">Try again</button>
+          </div>
+        )}
+
+        {ready && <p className="text-xs text-slate-400">Data loaded from the DummyJSON API. Changes you make stay until you reload the data.</p>}
+
+        {ready && view === "overview" && (
           <>
             <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
               {stats.map((s) => (
@@ -294,7 +344,7 @@ export default function App() {
                 <p className="rounded-xl bg-emerald-50 p-4 text-sm text-emerald-700">Everyone is on track right now.</p>
               ) : (
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {attention.sort((a, b) => a.s - b.s).map((e) => (
+                  {[...attention].sort((a, b) => a.s - b.s).map((e) => (
                     <button key={e.id} onClick={() => setSelId(e.id)} className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 text-left hover:border-indigo-300">
                       <Avatar e={e} size="h-10 w-10 text-xs" />
                       <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{e.name}</span><span className={`mt-0.5 inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${tier(e.s)[1]}`}>{tier(e.s)[0]}</span></span>
@@ -307,7 +357,7 @@ export default function App() {
           </>
         )}
 
-        {view === "team" && (
+        {ready && view === "team" && (
           <>
             <section className="space-y-3">
               <div className="flex gap-2">
